@@ -1,30 +1,29 @@
 from threading import Thread
 import time
 
-class Logic(Thread):
-    def __init__(self, postman):
-        Thread.__init__(self)
-        self.postman = postman
 
-        self.state = 0
+class Logic(Thread):
+    def __init__(self, channel):
+        Thread.__init__(self)
+        self.inputs = channel.inputs
+        self.outputs = channel.outputs
+        self.tick = 0
 
         self.messages = []
 
-    def get_state(self):
-        return self.state
+    def get_tick(self):
+        return self.tick
 
     def run(self):
         while True:
-            self.state += 1
-            time.sleep(1)
+            time.sleep(0.1)
+            self.tick += 1
 
-            self.postman.lock.acquire()
-            self.messages = self.postman.get_inbox()
-            if self.messages:
-                print('Logic: Messages recv')
+            try:
+                if self.inputs.can_get():
+                    self.messages = self.inputs.get()
 
-            for message in self.messages:
-                state = '%s %s' % (self.state, message.value)
-                self.postman.give_state(state, message.host)
-                print('Logic: %s outgoing to %s' %(state, message.host))
-            self.postman.lock.release()
+                    for message in self.messages:
+                        self.outputs.give(message)
+            except:
+                print('Logic error')

@@ -28,11 +28,6 @@ class Client:
 
         print('Recv %s from %s' % (raw_data.decode(), server))
 
-        data = self.decode_data(raw_data)
-        if data[1] == 0: #Join token
-            self.token = data[2]
-            message = create_message(data[0], 0, data[2])  # Awk
-            self.send(message)
 
 
 
@@ -41,7 +36,7 @@ class Client:
 joins = 0
 msgs = 0
 clients = []
-for i in range(100):
+for i in range(10):
     client = Client(i)
     clients.append(client)
     client.connect('localhost', 45456)
