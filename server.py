@@ -1,9 +1,8 @@
 import socket
 import time
-import random
-import sys
+
 from threading import Thread
-from sharing import Message
+from sharing import Message, Clock
 
 up = 1 << 0
 down = 1 << 1
@@ -22,23 +21,41 @@ z = 1 << 6
 tab = 1 << 7
 esc = 1 << 8
 
+PING_RATE = 100
+CONNECTION_WARN_RATE = 50
+TIMEOUT_WARNINGS_TO_KILL = 3
+
+GET_WORLD_COMMAND = -1
+JOIN_COMMAND = 0
+UPDATE_PLAYER_COMMAND = 1
+UPDATE_PLAYERS_COMMAND = 2
+PLAYER_INPUT_COMMAND = 3
+GET_ACTORS_COMMAND = 4
+GET_ACTOR_COMMAND = 5
+MESSAGE_COMMAND = 6
+
+
 class Server(Thread):
-    def __init__(self, address, port, input_channel, output_channel):
+    def __init__(self, address, port, game):
         Thread.__init__(self)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
         self.address = address
         self.port = port
         self.host = (address, port)
         self.host_name = '%s:%s' % (address, port)
 
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.input_channel = input_channel
-        self.output_channel = output_channel
-        self.connections = ConnectionManager(output_channel)
+        self.game = game
+        self.input_channel = game.input_channel
+        self.output_channel = game.output_channel
+
+        self.connections = ConnectionManager(self)
         self.connections.start()
 
     def run(self):
         self.socket.bind(self.host)
         print('Server: Waiting for data')
+
         while True:
             #print('Server: Waiting for data')
 
@@ -53,37 +70,25 @@ class Server(Thread):
     def handle_input(self, data, host):
         message = self.get_message(data, host)
         if self.connections.has(host):
-            self.connections.confirm(message.index, host)  # Direct callback for ACK
+            self.connections.confirm(host)  # Direct callback for ACK
             #print('Server: %s recv from %s' % (message.value, message.host_name))
         else:
             self.connections.add(data, host)
-            #print('Server: Join from %s' % message.host_name)
+            print('Server: New connection from %s' % message.host_name)
 
-        self.input_channel.give(message, 'logic')
-        
+        self.input_channel.give(message, 'game')
+
     def get_message(self, data, host):
         raw_data = data
         data = data.decode().split('][')
         index = int(data[0])
-        command_number = int(data[1])
+        command = int(data[1])
         value = data[2]
-        
-        message = Message(index, command_number, value, host)
+
+        message = Message(index, command, value, host)
         message.raw_data = raw_data
-        message.command_number = command_number
 
-        if command_number == 0:
-            message.command = 'join'
-            value = value.split(':|:')
-            print(data)
-            print(value)
-            message.username = value[0]
-            message.password = value[1]
-
-            print('Server: Join from %s' % message.host_name)
-
-        elif command_number == 1:
-            message.command = 'input'
+        if command == PLAYER_INPUT_COMMAND:
             value = value.split(':')
             directions = int(value[0])
             buttons = int(value[1])
@@ -123,65 +128,87 @@ class Server(Thread):
 
             message.inputs = inputs
 
-            if inputs:
-                print('Server: %s recv from %s at %s' % (inputs, message.host_name, message.index))
+            #if inputs:
+            #    print('Server: %s recv from %s at %s' % (inputs, message.host_name, message.index))
 
-        elif command_number == 2:
-            message.command = 'broadcast'
+        elif command == GET_ACTORS_COMMAND:
+            pass
 
-        elif command_number == 3:
-            message.command = 'get_map'
-            self.value = int(self.value)
+        elif command == GET_ACTOR_COMMAND:
+            pass
 
-        elif command_number == 4:
-            message.command = 'move'
-            value = self.value.split(':')
-            message.x = int(value[0])
-            message.y = int(value[1])
+        elif command == MESSAGE_COMMAND:
+            pass
 
-        elif command_number == 5:
-            message.command = 'get_actors'
+        elif command == JOIN_COMMAND:
+            value = value.split(':|:')
+            message.username = value[0]
+            message.password = value[1]
 
-        elif command_number == 6:
-            message.command = 'start_conflict'
+            print('Server: Join from %s at %s' % (message.username, message.host_name))
 
-        elif command_number == 7:
-            message.command = 'join_conflict'
+        elif command == GET_WORLD_COMMAND:
 
-        elif command_number == 8:
-            message.command = 'talk'
-
-        elif command_number == 9:
-            message.command = 'action'
-
-        else:
-            message.command = 'invalid'
+            print('Server: World request from %s' % message.host_name)
 
         return message
 
 
 class ConnectionManager(Thread):
-    def __init__(self, output_channel):
+    def __init__(self, server):
         Thread.__init__(self)
-        self.output_channel = output_channel
+        self.input_channel = server.input_channel
+        self.output_channel = server.output_channel
+        self.host = server.host
 
+        self.clock = Clock(1/15.0)
         self.connections = {}
+
 
     def run(self):
         while True:
             #try:
-            for host in self.connections:
-                if self.output_channel.has(host):
-                    messages = self.output_channel.get(host)
-                    for message in messages:
-                        self.connections[host].send(message)
+            if self.clock.tick():
+                message = Message(self.clock.value, UPDATE_PLAYERS_COMMAND, 'new_turn', self.host)
+                self.input_channel.give(message, 'game')
+
+                if self.clock.value % PING_RATE == 0:
+                    self.check_connections()
+
+            connections = self.connections
+            for host in connections:
+                    if self.output_channel.has(host):
+                        messages = self.output_channel.get(host)
+                        for message in messages:
+                            connections[host].send(message, self.clock.value)
+
             #except:
             #    print('Connection Error')
 
             time.sleep(0.001)
 
-    def confirm(self, index, host):
-        self.connections[host].last_msg = index
+    def confirm(self, host):
+        self.connections[host].last_msg = self.clock.value
+        self.connections[host].timeout_warnings = 0
+
+    def check_connections(self):
+        print('Server: Checking connections')
+        healthy_connections = {}
+
+        for host in self.connections:
+            connection = self.connections[host]
+            if connection.check_connection(self.clock.value) < CONNECTION_WARN_RATE:
+                healthy_connections[host] = connection
+            else:
+                connection.timeout_warnings += 1
+                if connection.timeout_warnings < TIMEOUT_WARNINGS_TO_KILL:
+                    print('Server: Timeout warning from %s:%s' % host)
+                    healthy_connections[host] = connection
+                else:
+                    print('Server: Disconnect from %s:%s' % host)
+
+
+        self.connections = healthy_connections
 
     def add(self, data, host):
         conn = Connection(host)
@@ -208,17 +235,21 @@ class Connection:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.message_index = 0
         self.message_queue = []
-        self.alive = 2
+        self.timeout_warnings = 0
         self.last_msg = -1
-
-        random.seed = self.host_name
-        self.token = random.randint(0, sys.maxsize)
 
         self.handshake()
 
+    def check_connection(self, tick):  # returns ticks since last message
+        return tick - self.last_msg
+
+
     def handshake(self):
-        results = '%s][%s][%s' % (0, 0, self.token)
-        self.send_data(results.encode())
+        return
+
+    def send(self, message, tick):
+        packet = message.get_packet(tick)
+        self.send_data(packet)
 
     def send_data(self, data):
         try:
@@ -226,8 +257,3 @@ class Connection:
             #print('Conn %s: sent %s' % (self.host_name, data.decode()))
         except:
             print('Conn %s: error sending %s' % (self.host_name, data.decode()))
-
-    def send(self, message):
-        packet = message.get_packet()
-        self.message_index += 1
-        self.send_data(packet)

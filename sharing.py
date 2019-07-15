@@ -1,4 +1,23 @@
 from threading import Lock
+import time
+import numpy
+
+
+class Clock:
+    def __init__(self, rate):
+        self.tick_rate = rate
+
+        self.value = numpy.int64(0)
+        self.last_tick = time.time()
+
+    def tick(self):
+        results = False
+        current_time = time.time()
+        if current_time - self.last_tick > self.tick_rate:
+            results = True
+            self.last_tick = current_time
+            self.value += 1
+        return results
 
 
 class SharedList:
@@ -28,6 +47,7 @@ class SharedList:
     def get_message(self, index, command, value, host):
         return Message(index, command, value, host)
 
+
 class Message:
     def __init__(self, index, command, value, host):
         self.index = index
@@ -36,7 +56,7 @@ class Message:
         self.host = host
         self.host_name = '%s:%s' % (host[0], host[1])
 
-    def get_packet(self):
-        packet = '%s][%s][%s' % (self.index, self.command, self.value)
+    def get_packet(self, tick):
+        packet = '%s][%s][%s' % (tick, self.command, self.value)
         return packet.encode()
 
