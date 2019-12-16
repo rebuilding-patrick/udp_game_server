@@ -4,21 +4,27 @@ import time
 import socket
 
 
-class Packet:
-   def __init__(self, data, host):
-      self.data = data
-      self.host = host
+class Message:
+   def __init__(self, host, data, time, index, command, args):
+      self.host = host #IPAddress:Host
+      self.data = data #Stirng
+
+      self.time = time #Int
+      self.index = index #Int
+      self.command = command #String
+      self.args = args #Array of Strings
 
 
-class PacketPool:
+class MessagePool:
    def __init__(self, size):
       self.size = size
       self.index = -1
       self.pool = []
 
-      null_packet = Packet("null", ("0.0.0.0", 0))
+      null_ip = ("0.0.0.0", 0)
+      null_msg = Message(null_ip, "null", -1, 0, "null", [])
       for i in range(size):
-         self.pool.append(null_packet)
+         self.pool.append(null_msg)
 
    def advance(self):
       self.index += 1
@@ -26,18 +32,41 @@ class PacketPool:
          self.index = 0
       return self.index
 
-   def geti(self, index):
+   def getat(self, index):
       return self.pool[index]
 
    def get(self):
       return self.pool[index]
 
-   def set(self, index, packet):
-      self.pool[index] = packet
+   def set(self, index, message):
+      self.pool[index] = message
 
-   def add(self, packet):
+   def add(self, message):
       self.advance()
-      self.pool[self.index] = packet
+      self.pool[self.index] = message
+
+
+class Parser:
+   def __init__(self, clock):
+      self.clock = clock
+      self.delimiter = b"/"
+      host = ("127.0.0.1", 0)
+      self.bad_message = Message(host, "bad message", 0, 0, "-999", [])
+
+   def encode(self, command, data, index=0):
+      return f"{data}/{command}/{index}/{self.clock.time}".encode()
+
+   def decode(self, data, host):
+      #try:
+      args = data.split(self.delimiter)
+      time = int(args.pop())
+      index = int(args.pop())
+      command = args.pop()
+
+      return Message(host, data, time, index, command, args)
+      #except:
+      #   print(f"Network: Error parsing packet {data} from {host}")
+      #   return self.bad_message
 
 
 class Connection:
@@ -46,29 +75,33 @@ class Connection:
       self.port = port
       self.host_name = f"{address}:{port}"
       self.host = (address, port)
-      self.history = PacketPool(200)
+      self.history = MessagePool(200)
       self.last = 0
       self.warnings = 0
 
-   def log(self, packet, time):
-      self.history.add(packet)
-      self.last = time
+   def log(self, message):
+      self.history.add(message)
+      self.last = message.time
 
    def check(self, time):
-      if time - self.last > 10:
+      if time - self.last > 5:
+         print(f"Warning {self.warnings}")
          self.warnings += 1
       else:
          self.warnings = 0
       return self.warnings
 
-#TODO I think the network should have some way to send guarenteed packets and then most packets are broadcast as is.
+#TODO I think the network should have some way to send guarenteed messages and then most messages are broadcast as is.
 #Should the rebroadcast occur on the game or in the network? Both?
 class Network:
-   def __init__(self, address, port):    
+   def __init__(self, address, port, clock):    
+      self.parser = Parser(clock)
       self.connections = {}
       self.connection = Connection(address, port)
       self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        
+      self.resending = {}
+      self.index = 0
+
    def bind(self):
       try:
          print(f"Network: Starting on {self.connection.host_name}")
@@ -77,61 +110,48 @@ class Network:
          print("Network: Failed to start")
 
    def recv(self):
-      try:
-         data, host = self.socket.recvfrom(1024)
-         #print(f"Network: recv {data} from {host}")
-         packet = Packet(data, host)
-         self.log(packet)
-         return packet
-      except:
-         print("Network: err recv")
-
-   def send(self, packet):
       #try:
-      #print(f"Network: Sending {packet.data} to {host}")
-      self.socket.sendto(packet.data, packet.host)
-         #self.connection.log(packet, self.clock.time)
+      packet = self.socket.recvfrom(1024)
+      message = self.parser.decode(packet[0], packet[1])
+      if message.index > 0:
+         if message.index in self.resending:
+            del self.resending[message.index]
+
+      return message
       #except:
-      #   print("Network: err sending")
+      #   print("Network: err recv")
 
-   def sendto(self, data, host):
+   def promise(self, command, data, host):
+      self.index += 1
+      self.resending[index] = (host, self.praser.encode(command, data, index))
+
+   def resend(self):
+      for packet in self.resending:
+         self.sendto_data(packet[1], packet[0])
+
+   def sendto_data(self, data, host):
       #try:
-      #print(f"Network: Sending {data} to {host}")
+      #print(f"Network: Sending {message.data} to {host}")
       self.socket.sendto(data, host)
-         #self.connection.log(packet, self.clock.time)
       #except:
       #   print("Network: err sending")
-      
+
+   def sendto(self, command, data, host):
+      msg = self.parser.encode(command, data)
+      self.sendto_data(msg, host)
+
+   def send(self, command, data):
+      msg = self.parser.encode(command, data)
+      self.sendto_data(msg, self.connection.host)
+
    def send_data(self, data):
-      self.sendto(data, self.connection.host)
+      self.sendto_data(data, self.connection.host)
 
-   def sendall(self, data):
-      #try:
-      #print(f"Sending all #{data}")
+   def sendall_data(self, data):
       for con in self.connections:
-         self.sendto(data, con)
-      #except:
-      #   print("Network: err sendall")
+         self.send_data(data, con)
 
-   def log(self, packet):
-      if packet.host in self.connections:
-         #self.connections[packet.host].log(packet, self.clock.time.value)
-         return
-      else:
-         self.connections[packet.host] = Connection(packet.host[0], packet.host[1])
-
-   def check_connections(self):
-      print("Server: Checking connections")
-      dead = []
-      time = 1 #self.clock.time.value
-      for con in self.connections:
-         warnings = con[1].check(time)
-         if warnings > 2:
-            print("Server: #{con.host} has timed out")
-            dead.append(con[0])
-         elif warnings > 0:
-            print("Server: Timeout warning for #{con.host}")
-
-      for host in dead:
-         self.connections.delete(host)
+   def sendall(self, command, data):
+      msg = self.parser.encode(command, data)
+      self.sendall_data(msg)
 
