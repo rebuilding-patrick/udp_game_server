@@ -5,12 +5,11 @@ import socket
 
 
 class Message:
-   def __init__(self, host, data, time, index, command, args):
+   def __init__(self, host, data, time, command, args):
       self.host = host #IPAddress:Host
       self.data = data #Stirng
 
       self.time = time #Int
-      self.index = index #Int
       self.command = command #String
       self.args = args #Array of Strings
 
@@ -22,7 +21,7 @@ class MessagePool:
       self.pool = []
 
       null_ip = ("0.0.0.0", 0)
-      null_msg = Message(null_ip, "null", -1, 0, "null", [])
+      null_msg = Message(null_ip, "null", -1, "null", [])
       for i in range(size):
          self.pool.append(null_msg)
 
@@ -51,19 +50,18 @@ class Parser:
       self.clock = clock
       self.delimiter = b"/"
       host = ("127.0.0.1", 0)
-      self.bad_message = Message(host, "bad message", 0, 0, "-999", [])
+      self.bad_message = Message(host, "bad message", 0, "-999", [])
 
-   def encode(self, command, data, index=0):
-      return f"{data}/{command}/{index}/{self.clock.time}".encode()
+   def encode(self, command, data):
+      return f"{data}/{command}/{self.clock.time}".encode()
 
    def decode(self, data, host):
       #try:
       args = data.split(self.delimiter)
       time = int(args.pop())
-      index = int(args.pop())
       command = args.pop()
 
-      return Message(host, data, time, index, command, args)
+      return Message(host, data, time, command, args)
       #except:
       #   print(f"Network: Error parsing packet {data} from {host}")
       #   return self.bad_message
@@ -111,12 +109,13 @@ class Network:
 
    def recv(self):
       #try:
-      packet = self.socket.recvfrom(1024)
+      packet = self.socket.recvfrom(1024) #TODO pool for this
+      print(f"Network: recv {packet[0]}")
       message = self.parser.decode(packet[0], packet[1])
-      if message.index > 0:
-         if message.index in self.resending:
-            del self.resending[message.index]
-
+      # if message.index > 0:
+      #    if message.index in self.resending:
+      #       del self.resending[message.index]
+      #print(f"Network: recv {message.data}")
       return message
       #except:
       #   print("Network: err recv")
@@ -131,7 +130,7 @@ class Network:
 
    def sendto_data(self, data, host):
       #try:
-      #print(f"Network: Sending {message.data} to {host}")
+      #print(f"Network: Sending {data} to {host}")
       self.socket.sendto(data, host)
       #except:
       #   print("Network: err sending")
