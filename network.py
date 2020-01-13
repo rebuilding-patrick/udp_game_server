@@ -31,7 +31,7 @@ class MessagePool:
          self.index = 0
       return self.index
 
-   def getat(self, index):
+   def get_at(self, index):
       return self.pool[index]
 
    def get(self):
@@ -52,8 +52,8 @@ class Parser:
       host = ("127.0.0.1", 0)
       self.bad_message = Message(host, "bad message", 0, "-999", [])
 
-   def encode(self, command, data):
-      return f"{data}/{command}/{self.clock.time}".encode()
+   def encode(self, string):
+      return f"{string}/{self.clock.get_time()}".encode()
 
    def decode(self, data, host):
       #try:
@@ -107,10 +107,13 @@ class Network:
       except:
          print("Network: Failed to start")
 
+   def new_connection(self, message):
+      self.connections[message.host] = Connection(message.host[0], message.host[1])
+
    def recv(self):
       #try:
       packet = self.socket.recvfrom(1024) #TODO pool for this
-      print(f"Network: recv {packet[0]}")
+      #print(f"Network: recv {packet[0]}")
       message = self.parser.decode(packet[0], packet[1])
       # if message.index > 0:
       #    if message.index in self.resending:
@@ -128,29 +131,22 @@ class Network:
       for packet in self.resending:
          self.sendto_data(packet[1], packet[0])
 
-   def sendto_data(self, data, host):
+   def send_data(self, data, host):
       #try:
       #print(f"Network: Sending {data} to {host}")
       self.socket.sendto(data, host)
       #except:
       #   print("Network: err sending")
 
-   def sendto(self, command, data, host):
-      msg = self.parser.encode(command, data)
-      self.sendto_data(msg, host)
+   def send(self, string, host):
+      data = self.parser.encode(string)
+      self.send_data(data, host)
 
-   def send(self, command, data):
-      msg = self.parser.encode(command, data)
-      self.sendto_data(msg, self.connection.host)
+   def send_con(self, string):
+      self.send(string, self.connection.host)
 
-   def send_data(self, data):
-      self.sendto_data(data, self.connection.host)
-
-   def sendall_data(self, data):
+   def sendall(self, string):
+      data = self.parser.encode(string)
       for con in self.connections:
-         self.send_data(data, con)
-
-   def sendall(self, command, data):
-      msg = self.parser.encode(command, data)
-      self.sendall_data(msg)
+         self.data_send(data, con)
 
