@@ -1,8 +1,6 @@
 
-from threading import Thread
 import time
 import socket
-
 
 JOIN_B = b"3"
 AWK_B = b"2"
@@ -21,7 +19,6 @@ AWK_I = 2
 RELIABLE_I = 1
 UNRELIABLE_I = 0
 ERR_I = 4
-
 
 class Message:
    def __init__(self, index, command, args, host, data):
