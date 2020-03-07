@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "renet"
-version = "0.01"
+version = "0.011"
 description = "Renet, reliable udp"
 readme = "README.md"
 homepage = "https://github.com/solidsmokesoftware/renet.py"

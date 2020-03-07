@@ -60,7 +60,6 @@ class Connection:
       self.host_name = f"{address}:{port}"
       self.host = (address, port)
 
-      self.history = MessagePool(200)
       self.last = 0
       self.warnings = 0
 
